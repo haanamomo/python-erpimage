@@ -6,6 +6,9 @@ import argparse
 import os
 from PIL import Image
 from pathlib import Path
+from collections import defaultdict
+import re
+import shutil
 
 ALLOWED_FILE_TYPES = [
     '.jpg', '.jpeg', '.png', '.webp'
@@ -27,11 +30,10 @@ def process_file(file_path: Path, index: int, output_folder: Path):
 def process_folder(src_folder: Path, output_root):
     parts = src_folder.name.split('-')
     if len(parts) < 3:
-        print(f"❌ 跳过不规范文件夹名：{src_folder.name}")
-        return
-
-    middle = parts[1]
-    output_folder = output_root / middle
+        output_folder = output_root / src_folder.name
+    else:
+        middle = parts[1]
+        output_folder = output_root / middle
 
     image_files = [
         f for f in src_folder.iterdir()
@@ -43,20 +45,58 @@ def process_folder(src_folder: Path, output_root):
     for idx, file_path in enumerate(image_files, start=1):
         process_file(file_path, idx, output_folder)
 
+def process_flattened(input_path: Path, output_root: Path):
+    """
+    扫描所有文件，按文件名前缀分组（例如 '1601 黑色 1.jpg' → '1601'）
+    并把每组图放到 output_root/1601 里再转换为 webp
+    """
+    print("🔍 处理模式：摊平目录 ", input_path)
+
+    grouped_files = defaultdict(list)
+
+    for file in input_path.iterdir():
+        if not file.is_file() or file.suffix.lower() not in ALLOWED_FILE_TYPES:
+            continue
+
+        # 匹配类似于 "1601 黑色 1.jpg" 的文件名，提取前缀
+        match = re.match(r'^(\d+)', file.stem)
+        if match:
+            prefix = match.group(1)
+            grouped_files[prefix].append(file)
+        else:
+            print("not match: ", file.stem)
+
+    for prefix, files in grouped_files.items():
+        files.sort()
+        print(f"📦 平铺组：{prefix}，共 {len(files)} 张")
+        for idx, file in enumerate(files, start=1):
+            process_file(file, idx, output_root / prefix)
+
 
 def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("input_path", help='The path of the input file.')
+    parser.add_argument("-f", "--flattened", action="store_true", help='是否处理摊平图片（统一目录中带编号）')
 
-    options = parser.parse_args()
+    args = parser.parse_args()
 
-    input_path = Path(options.input_path)
+    input_path = Path(args.input_path)
     output_root = input_path.parent / f"{input_path.name}_output"
+    # 清空已有的输出目录（如果存在）
+    if output_root.exists() and output_root.is_dir():
+        shutil.rmtree(output_root)
 
-    for folder in input_path.iterdir():
-        if folder.is_dir():
-            process_folder(folder, output_root)
+    # 重建空目录
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    if args.flattened:
+        process_flattened(input_path, output_root)
+    else:
+        print("🔍 处理模式：标准目录结构")
+        for folder in input_path.iterdir():
+            if folder.is_dir():
+                process_folder(folder, output_root)
 
 
 if __name__ == "__main__":
