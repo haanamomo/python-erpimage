@@ -9,19 +9,31 @@ from pathlib import Path
 from collections import defaultdict
 import re
 import shutil
+import hashlib
 
 ALLOWED_FILE_TYPES = [
     '.jpg', '.jpeg', '.png', '.webp'
 ]
 
+def generate_content_hash(file_path: Path, hash_len=10) -> str:
+    """生成文件内容的 hash，用作唯一ID"""
+    hasher = hashlib.md5()
+    with file_path.open('rb') as f:
+        while chunk := f.read(8192):
+            hasher.update(chunk)
+    return hasher.hexdigest()[:hash_len]
+
+
 def process_file(file_path: Path, index: int, output_folder: Path):
     """将单张图片转为 webp 并输出到 output_folder 下"""
     try:
         output_folder.mkdir(parents=True, exist_ok=True)
-        new_path = output_folder / f"{index}.webp"
+        file_id = generate_content_hash(file_path)
+
+        new_path = output_folder / f"{file_id}.webp"
 
         with Image.open(file_path) as img:
-            img.convert('RGB').save(new_path, 'webp')
+            img.convert('RGB').save(new_path, 'webp', quality=80, method=6)
         print(f"  ✅ {file_path.name} → {new_path.name}")
     except Exception as e:
         print(f"  ❌ 转换失败：{file_path.name}，错误：{e}")
@@ -45,6 +57,8 @@ def process_folder(src_folder: Path, output_root):
     for idx, file_path in enumerate(image_files, start=1):
         process_file(file_path, idx, output_folder)
 
+flattened_pattern = re.compile(r'^([A-Z]{0,3}\d{3,6})')
+
 def process_flattened(input_path: Path, output_root: Path):
     """
     扫描所有文件，按文件名前缀分组（例如 '1601 黑色 1.jpg' → '1601'）
@@ -59,7 +73,7 @@ def process_flattened(input_path: Path, output_root: Path):
             continue
 
         # 匹配类似于 "1601 黑色 1.jpg" 的文件名，提取前缀
-        match = re.match(r'^(\d+)', file.stem)
+        match = flattened_pattern.match(file.stem)
         if match:
             prefix = match.group(1)
             grouped_files[prefix].append(file)
